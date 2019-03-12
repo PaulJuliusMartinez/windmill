@@ -1,0 +1,8 @@
+[package]
+name = "wmc"
+version = "0.1.0"
+authors = ["Paul Julius Martinez <pauljuliusmartinez@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm7-0" }

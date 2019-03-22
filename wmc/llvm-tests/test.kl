@@ -1,2 +1,5 @@
 def foo(a b c)
   a + (b * c)
+
+def pizza(a)
+  a * b + c * d

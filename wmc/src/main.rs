@@ -1,8 +1,16 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::iter;
 use std::str;
 use std::vec;
+
+use inkwell::builder::Builder;
+use inkwell::context::Context;
+use inkwell::module::Module;
+use inkwell::values::AnyValue;
+use inkwell::values::AnyValueEnum;
+use inkwell::FloatPredicate;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -10,6 +18,8 @@ fn main() {
 
     let tokens = KTokenizer::from_filename(filename);
     println!("{:#?}", parse(tokens));
+
+    test_llvm();
 }
 
 /*********
@@ -176,7 +186,7 @@ enum KToken {
  * bin_op :: '+' | '-' | '*' | '<'
  */
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 enum BinaryOperator {
     Plus,
     Minus,
@@ -365,5 +375,68 @@ fn token_to_bin_op(token: KToken) -> BinaryOperator {
         KToken::Unknown('-') => BinaryOperator::Minus,
         KToken::Unknown('*') => BinaryOperator::Times,
         _ => panic!("Expected next token to be binary operator."),
+    }
+}
+
+/************
+ * CODE GEN *
+ ************/
+
+struct CodeGenContext {
+    llvm: Context,
+    builder: Builder,
+    module: Module,
+    variables: HashMap<String, AnyValueEnum>,
+}
+
+fn test_llvm() {
+    let llvm = Context::create();
+    let builder = llvm.create_builder();
+    let module = llvm.create_module("kaleidoscope");
+    let variables = HashMap::new();
+
+    let code_gen_context = CodeGenContext {
+        llvm,
+        builder,
+        module,
+        variables,
+    };
+}
+
+trait CodeGen {
+    fn code_gen(&self, cgc: &CodeGenContext) -> AnyValueEnum;
+}
+
+impl CodeGen for Expr {
+    fn code_gen(&self, cgc: &CodeGenContext) -> AnyValueEnum {
+        match self {
+            Expr::Literal(n) => cgc.llvm.f64_type().const_float(*n).as_any_value_enum(),
+            Expr::Variable(var_name) => match cgc.variables.get(var_name) {
+                Some(val) => *val,
+                None => panic!("Couldn't find variable!"),
+            },
+            Expr::BinaryOp { op, left, right } => {
+                let lhs = left.code_gen(cgc).into_float_value();
+                let rhs = right.code_gen(cgc).into_float_value();
+
+                // Do LessThan separately otherwise branches of match have different return types.
+                if *op == BinaryOperator::LessThan {
+                    return cgc
+                        .builder
+                        .build_float_compare(FloatPredicate::OLT, lhs, rhs, "lttemp")
+                        .as_any_value_enum();
+                }
+
+                let result = match op {
+                    BinaryOperator::Plus => cgc.builder.build_float_add(lhs, rhs, "addtemp"),
+                    BinaryOperator::Minus => cgc.builder.build_float_sub(lhs, rhs, "subtemp"),
+                    BinaryOperator::Times => cgc.builder.build_float_mul(lhs, rhs, "multemp"),
+                    _ => unreachable!(),
+                };
+
+                result.as_any_value_enum()
+            }
+            _ => unimplemented!(),
+        }
     }
 }

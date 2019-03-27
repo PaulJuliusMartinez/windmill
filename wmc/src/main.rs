@@ -456,3 +456,22 @@ impl CodeGen for Expr {
         }
     }
 }
+
+impl Top {
+    fn code_gen(&self, cgc: &CodeGenContext) -> AnyValueEnum {
+        match self {
+            Top::ExternDefinition(proto) => {
+                let f64_type = cgc.llvm.f64_type();
+                let arg_types: Vec<BasicTypeEnum> =
+                    std::iter::repeat(f64_type.as_basic_type_enum())
+                        .take(proto.args.len())
+                        .collect();
+                let fn_type = f64_type.fn_type(&arg_types, false);
+                cgc.module
+                    .add_function(&proto.name, fn_type, Some(Linkage::External))
+                    .as_any_value_enum()
+            }
+            _ => unimplemented!(),
+        }
+    }
+}

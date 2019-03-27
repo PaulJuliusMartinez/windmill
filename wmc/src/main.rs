@@ -457,20 +457,65 @@ impl CodeGen for Expr {
     }
 }
 
-impl Top {
+impl Prototype {
     fn code_gen(&self, cgc: &CodeGenContext) -> AnyValueEnum {
+        let num_args = self.args.len();
+        let f64_type = cgc.llvm.f64_type();
+        let arg_types: Vec<BasicTypeEnum> = std::iter::repeat(f64_type.as_basic_type_enum())
+            .take(num_args)
+            .collect();
+        let fn_type = f64_type.fn_type(&arg_types, false);
+        let function_value = cgc
+            .module
+            .add_function(&self.name, fn_type, Some(Linkage::External));
+
+        // Define argument names
+        for i in 0..num_args {
+            function_value
+                .get_nth_param(i as u32)
+                .unwrap()
+                .as_float_value()
+                .set_name(&self.args[i]);
+        }
+
+        function_value.as_any_value_enum()
+    }
+}
+
+impl Top {
+    fn code_gen(&self, cgc: &mut CodeGenContext) -> AnyValueEnum {
         match self {
-            Top::ExternDefinition(proto) => {
-                let f64_type = cgc.llvm.f64_type();
-                let arg_types: Vec<BasicTypeEnum> =
-                    std::iter::repeat(f64_type.as_basic_type_enum())
-                        .take(proto.args.len())
-                        .collect();
-                let fn_type = f64_type.fn_type(&arg_types, false);
-                cgc.module
-                    .add_function(&proto.name, fn_type, Some(Linkage::External))
-                    .as_any_value_enum()
+            Top::ExternDefinition(proto) => proto.code_gen(cgc),
+            Top::Definition(proto, expr) => {
+                let function_value = proto.code_gen(cgc).into_function_value();
+
+                if cgc.module.get_function(&proto.name).is_some() {
+                    panic!("Cannot redeclare function. {}", proto.name);
+                }
+
+                let bb = cgc.llvm.append_basic_block(&function_value, "entry");
+
+                // TODO: Set insertion point?
+
+                // Initialize variables
+                cgc.variables.clear();
+                let len = proto.args.len();
+                for i in 0..len {
+                    cgc.variables.insert(
+                        proto.args[i].clone(),
+                        function_value.get_nth_param(i as u32).unwrap(),
+                    );
+                }
+
+                let return_value = expr.code_gen(cgc).into_float_value();
+                cgc.builder.build_return(Some(&return_value));
+
+                let print = true;
+                function_value.verify(print);
+
+                return function_value.as_any_value_enum();
             }
+            Top::Expr(expr) => expr.code_gen(cgc).as_any_value_enum(),
             _ => unimplemented!(),
         }
     }

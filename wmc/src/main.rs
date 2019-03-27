@@ -7,9 +7,9 @@ use std::vec;
 
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::module::Module;
-use inkwell::values::AnyValue;
-use inkwell::values::AnyValueEnum;
+use inkwell::module::{Linkage, Module};
+use inkwell::types::{BasicType, BasicTypeEnum};
+use inkwell::values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum};
 use inkwell::FloatPredicate;
 
 fn main() {
@@ -386,7 +386,7 @@ struct CodeGenContext {
     llvm: Context,
     builder: Builder,
     module: Module,
-    variables: HashMap<String, AnyValueEnum>,
+    variables: HashMap<String, BasicValueEnum>,
 }
 
 fn test_llvm() {
@@ -404,13 +404,13 @@ fn test_llvm() {
 }
 
 trait CodeGen {
-    fn code_gen(&self, cgc: &CodeGenContext) -> AnyValueEnum;
+    fn code_gen(&self, cgc: &CodeGenContext) -> BasicValueEnum;
 }
 
 impl CodeGen for Expr {
-    fn code_gen(&self, cgc: &CodeGenContext) -> AnyValueEnum {
+    fn code_gen(&self, cgc: &CodeGenContext) -> BasicValueEnum {
         match self {
-            Expr::Literal(n) => cgc.llvm.f64_type().const_float(*n).as_any_value_enum(),
+            Expr::Literal(n) => cgc.llvm.f64_type().const_float(*n).as_basic_value_enum(),
             Expr::Variable(var_name) => match cgc.variables.get(var_name) {
                 Some(val) => *val,
                 None => panic!("Couldn't find variable!"),
@@ -421,10 +421,13 @@ impl CodeGen for Expr {
 
                 // Do LessThan separately otherwise branches of match have different return types.
                 if *op == BinaryOperator::LessThan {
+                    let bool_bit =
+                        cgc.builder
+                            .build_float_compare(FloatPredicate::OLT, lhs, rhs, "cmpemp");
                     return cgc
                         .builder
-                        .build_float_compare(FloatPredicate::OLT, lhs, rhs, "lttemp")
-                        .as_any_value_enum();
+                        .build_unsigned_int_to_float(bool_bit, cgc.llvm.f64_type(), "booltmp")
+                        .as_basic_value_enum();
                 }
 
                 let result = match op {
@@ -434,9 +437,22 @@ impl CodeGen for Expr {
                     _ => unreachable!(),
                 };
 
-                result.as_any_value_enum()
+                result.as_basic_value_enum()
             }
-            _ => unimplemented!(),
+            Expr::FnCall { function, args } => match cgc.module.get_function(function) {
+                Some(llvm_fn) => {
+                    let fn_args: Vec<BasicValueEnum> =
+                        args.iter().map(|arg| arg.code_gen(cgc)).collect();
+                    // Not totally sure this is kosher.
+                    return cgc
+                        .builder
+                        .build_call(llvm_fn, &fn_args, "calltmp")
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap();
+                }
+                None => panic!("Couldn't find function!"),
+            },
         }
     }
 }

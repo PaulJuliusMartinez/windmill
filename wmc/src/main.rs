@@ -17,9 +17,43 @@ fn main() {
     let filename = &args[1];
 
     let tokens = KTokenizer::from_filename(filename);
-    println!("{:#?}", parse(tokens));
+    let parse_tree = parse(tokens).unwrap();
 
-    test_llvm();
+    let llvm = Context::create();
+    let builder = llvm.create_builder();
+    let module = llvm.create_module("kaleidoscope");
+    let variables = HashMap::new();
+
+    let mut code_gen_context = CodeGenContext {
+        llvm,
+        builder,
+        module,
+        variables,
+    };
+
+    for top_value in parse_tree.iter() {
+        let generated_ir = top_value.code_gen(&mut code_gen_context);
+
+        if generated_ir.is_function_value() {
+            println!(
+                "{}",
+                generated_ir
+                    .as_function_value()
+                    .print_to_string()
+                    .to_string()
+            );
+        } else if generated_ir.is_float_value() {
+            println!(
+                "{}",
+                generated_ir.as_float_value().print_to_string().to_string()
+            );
+        } else {
+            println!(
+                "Didn't get function value or float value: {:#?}",
+                generated_ir
+            );
+        }
+    }
 }
 
 /*********
@@ -47,33 +81,23 @@ impl KTokenizer {
 
 impl KTokenizer {
     fn next(&mut self) -> Option<KToken> {
-        println!("Called next");
         if self.peeked.is_some() {
             let stolen = self.peeked.take();
-            println!("Next token (peeked value): {:?}", stolen);
             return stolen.unwrap();
         }
 
         let next = self.next_impl();
-        println!("Next token: {:?}", next);
         return next;
     }
 
     fn peek(&mut self) -> Option<&KToken> {
-        println!("Called peek");
         if self.peeked.is_none() {
             self.peeked = Some(self.next_impl());
         }
 
         match self.peeked {
-            Some(Some(ref value)) => {
-                println!("Peeked: {:?}", value);
-                Some(value)
-            }
-            Some(None) => {
-                println!("Peeked: None");
-                None
-            }
+            Some(Some(ref value)) => Some(value),
+            Some(None) => None,
             _ => unreachable!(),
         }
     }
@@ -239,7 +263,6 @@ fn parse(mut tokens: KTokenizer) -> Result<Vec<Top>, String> {
 }
 
 fn parse_definition(tokens: &mut KTokenizer) -> Result<Top, String> {
-    println!("parsing definition");
     let _def = tokens.next();
     let prototype = parse_prototype(tokens)?;
     let expr = parse_expression(tokens)?;
@@ -247,14 +270,12 @@ fn parse_definition(tokens: &mut KTokenizer) -> Result<Top, String> {
 }
 
 fn parse_extern_definition(tokens: &mut KTokenizer) -> Result<Top, String> {
-    println!("parsing extern definition");
     let _extern = tokens.next();
     let prototype = parse_prototype(tokens)?;
     Ok(Top::ExternDefinition(prototype))
 }
 
 fn parse_prototype(tokens: &mut KTokenizer) -> Result<Prototype, String> {
-    println!("parsing prototype");
     let name = match tokens.next() {
         Some(KToken::Identifier(fn_name)) => fn_name,
         t => return Err(format!("Unexpected token: {:?}", t)),
@@ -278,13 +299,11 @@ fn parse_prototype(tokens: &mut KTokenizer) -> Result<Prototype, String> {
 }
 
 fn parse_expression(tokens: &mut KTokenizer) -> Result<Expr, String> {
-    println!("parsing expression");
     let expr = parse_primary_expression(tokens)?;
     parse_bin_op_rhs(tokens, 0, expr)
 }
 
 fn parse_primary_expression(tokens: &mut KTokenizer) -> Result<Expr, String> {
-    println!("parsing primary expression");
     match tokens.next() {
         Some(KToken::Number(n)) => {
             return Ok(Expr::Literal(n));
@@ -328,7 +347,6 @@ fn parse_bin_op_rhs(
     prev_precedence: i32,
     mut lhs: Expr,
 ) -> Result<Expr, String> {
-    println!("parsing binary op rhs");
     loop {
         let precedence = get_precedence(tokens.peek());
         if precedence < prev_precedence {
@@ -387,20 +405,6 @@ struct CodeGenContext {
     builder: Builder,
     module: Module,
     variables: HashMap<String, BasicValueEnum>,
-}
-
-fn test_llvm() {
-    let llvm = Context::create();
-    let builder = llvm.create_builder();
-    let module = llvm.create_module("kaleidoscope");
-    let variables = HashMap::new();
-
-    let code_gen_context = CodeGenContext {
-        llvm,
-        builder,
-        module,
-        variables,
-    };
 }
 
 trait CodeGen {
@@ -478,7 +482,8 @@ impl Prototype {
                 .set_name(&self.args[i]);
         }
 
-        function_value.as_any_value_enum()
+        // If I use .as_any_value_enum it mysteriously turns into a PointerValue.
+        AnyValueEnum::FunctionValue(function_value)
     }
 }
 
@@ -487,15 +492,14 @@ impl Top {
         match self {
             Top::ExternDefinition(proto) => proto.code_gen(cgc),
             Top::Definition(proto, expr) => {
-                let function_value = proto.code_gen(cgc).into_function_value();
-
                 if cgc.module.get_function(&proto.name).is_some() {
                     panic!("Cannot redeclare function. {}", proto.name);
                 }
 
+                let function_value = proto.code_gen(cgc).into_function_value();
                 let bb = cgc.llvm.append_basic_block(&function_value, "entry");
 
-                // TODO: Set insertion point?
+                cgc.builder.position_at_end(&bb);
 
                 // Initialize variables
                 cgc.variables.clear();
@@ -513,10 +517,9 @@ impl Top {
                 let print = true;
                 function_value.verify(print);
 
-                return function_value.as_any_value_enum();
+                AnyValueEnum::FunctionValue(function_value)
             }
             Top::Expr(expr) => expr.code_gen(cgc).as_any_value_enum(),
-            _ => unimplemented!(),
         }
     }
 }

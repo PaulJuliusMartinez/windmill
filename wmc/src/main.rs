@@ -8,6 +8,7 @@ use std::vec;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
+use inkwell::passes::PassManager;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum};
 use inkwell::FloatPredicate;
@@ -24,11 +25,23 @@ fn main() {
     let module = llvm.create_module("kaleidoscope");
     let variables = HashMap::new();
 
+    /* JIT Optimization */
+
+    let jit_module = llvm.create_module("kaleidoscope-jit");
+    let fpm = PassManager::create_for_function(&module);
+
+    fpm.add_instruction_combining_pass();
+    fpm.add_reassociate_pass();
+    fpm.add_gvn_pass();
+    fpm.add_cfg_simplification_pass();
+    fpm.initialize();
+
     let mut code_gen_context = CodeGenContext {
         llvm,
         builder,
         module,
         variables,
+        fpm,
     };
 
     for top_value in parse_tree.iter() {
@@ -405,6 +418,7 @@ struct CodeGenContext {
     builder: Builder,
     module: Module,
     variables: HashMap<String, BasicValueEnum>,
+    fpm: PassManager,
 }
 
 trait CodeGen {
@@ -516,6 +530,8 @@ impl Top {
 
                 let print = true;
                 function_value.verify(print);
+
+                cgc.fpm.run_on_function(&function_value);
 
                 AnyValueEnum::FunctionValue(function_value)
             }

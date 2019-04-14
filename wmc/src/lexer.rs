@@ -1,8 +1,29 @@
+use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Token {
+    // Keywords
+    KwIf,
+    KwElse,
+    KwWhile,
+    KwBreak,
+    KwContinue,
+    KwFor,
+    KwReturn,
+
+    KwTrue,
+    KwFalse,
+
+    KwFn,
+    KwLet,
+    KwSet,
+    KwSelf,
+    KwSelfType,
+    KwStruct,
+
+    // More complex keywords
     Whitespace,
     Comment(String),
     Identifier(String),
@@ -36,7 +57,7 @@ pub enum Token {
 
     // Single character tokens
     ExclamationPoint,
-    // Pound,
+    Pound,
     // Dollar,
     Percent,
     Ampersand,
@@ -61,6 +82,28 @@ pub enum Token {
     LeftCurly,
     VerticalBar,
     RightCurly,
+}
+
+lazy_static! {
+    static ref KEYWORDS: HashMap<&'static str, Token> = {
+        let mut m = HashMap::new();
+        m.insert("if", Token::KwIf);
+        m.insert("else", Token::KwElse);
+        m.insert("while", Token::KwWhile);
+        m.insert("break", Token::KwBreak);
+        m.insert("continue", Token::KwContinue);
+        m.insert("for", Token::KwFor);
+        m.insert("return", Token::KwReturn);
+        m.insert("true", Token::KwTrue);
+        m.insert("false", Token::KwFalse);
+        m.insert("fn", Token::KwFn);
+        m.insert("let", Token::KwLet);
+        m.insert("set", Token::KwSet);
+        m.insert("self", Token::KwSelf);
+        m.insert("selfType", Token::KwSelfType);
+        m.insert("struct", Token::KwStruct);
+        m
+    };
 }
 
 #[derive(Debug)]
@@ -102,11 +145,11 @@ impl<'a> LexerState<'a> {
 
             let token = match ch {
                 // Simple tokens:
-
-                // '#' => Token::Pound,
+                '#' => Token::Pound,
                 // '$' => Token::Dollar,
                 ',' => Token::Comma,
                 '.' => Token::Dot,
+                ':' => Token::Colon,
                 ';' => Token::Semicolon,
                 '?' => Token::Question,
                 '[' => Token::LeftSquare,
@@ -124,6 +167,7 @@ impl<'a> LexerState<'a> {
                 '+' => self.maybe_lex_ch_eq_token(Token::Plus, Token::PlusEqual),
                 '-' => self.maybe_lex_ch_eq_token(Token::Hyphen, Token::MinusEqual),
                 '/' => self.maybe_lex_ch_eq_token(Token::Slash, Token::DivideEqual),
+                '^' => self.maybe_lex_ch_eq_token(Token::Caret, Token::CaretEqual),
                 '=' => self.maybe_lex_ch_eq_token(Token::Equal, Token::DoubleEqual),
 
                 // Two/three character combinations with eq.
@@ -155,6 +199,10 @@ impl<'a> LexerState<'a> {
                     Token::GreaterThanEqual,
                     Token::DoubleGreaterThanEqual,
                 ),
+
+                letter @ '_' | letter @ 'a'...'z' | letter @ 'A'...'Z' => {
+                    self.lex_identifier_or_keyword(letter)
+                }
 
                 _ => Token::Unknown(ch),
             };
@@ -219,6 +267,32 @@ impl<'a> LexerState<'a> {
             ch_eq_token
         } else {
             single_ch_token
+        }
+    }
+
+    fn lex_identifier_or_keyword(&mut self, first_ch: char) -> Token {
+        let mut identifier = String::new();
+        identifier.push(first_ch);
+
+        loop {
+            match self.chars.peek() {
+                Some(&ch @ '_')
+                | Some(&ch @ 'a'...'z')
+                | Some(&ch @ 'A'...'Z')
+                | Some(&ch @ '0'...'9') => {
+                    // Consume ch
+                    self.chars.next();
+                    self.increment_pos(ch);
+                    identifier.push(ch);
+                }
+                _ => {
+                    if let Some(keyword_token) = KEYWORDS.get(identifier.as_str()) {
+                        return keyword_token.clone();
+                    } else {
+                        return Token::Identifier(identifier);
+                    }
+                }
+            }
         }
     }
 }

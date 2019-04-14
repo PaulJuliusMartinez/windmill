@@ -25,7 +25,9 @@ pub enum Token {
 
     // More complex keywords
     Whitespace,
-    Comment(String),
+    LineComment(String),
+    BlockComment(String),
+    UnterminatedBlockComment(String, u32),
     Identifier(String),
     DoubleQuoteLiteral(String),
     SingleQuoteLiteral(String),
@@ -166,7 +168,6 @@ impl<'a> LexerState<'a> {
                 '*' => self.maybe_lex_ch_eq_token(Token::Asterisk, Token::TimesEqual),
                 '+' => self.maybe_lex_ch_eq_token(Token::Plus, Token::PlusEqual),
                 '-' => self.maybe_lex_ch_eq_token(Token::Hyphen, Token::MinusEqual),
-                '/' => self.maybe_lex_ch_eq_token(Token::Slash, Token::DivideEqual),
                 '^' => self.maybe_lex_ch_eq_token(Token::Caret, Token::CaretEqual),
                 '=' => self.maybe_lex_ch_eq_token(Token::Equal, Token::DoubleEqual),
 
@@ -200,6 +201,10 @@ impl<'a> LexerState<'a> {
                     Token::DoubleGreaterThanEqual,
                 ),
 
+                // "/", "/=", or comments
+                '/' => self.lex_after_slash(),
+
+                // Lex identifiers and keywords.
                 letter @ '_' | letter @ 'a'...'z' | letter @ 'A'...'Z' => {
                     self.lex_identifier_or_keyword(letter)
                 }
@@ -267,6 +272,69 @@ impl<'a> LexerState<'a> {
             ch_eq_token
         } else {
             single_ch_token
+        }
+    }
+
+    fn lex_after_slash(&mut self) -> Token {
+        match self.chars.peek() {
+            Some(&'=') => Token::DivideEqual,
+            Some(&'/') => self.lex_line_comment(),
+            Some(&'*') => self.lex_block_comment(),
+            _ => Token::Slash,
+        }
+    }
+
+    fn lex_line_comment(&mut self) -> Token {
+        let mut comment = String::from("/");
+
+        while let Some(ch) = self.chars.next() {
+            self.increment_pos(ch);
+            comment.push(ch);
+            if ch == '\n' {
+                break;
+            }
+        }
+
+        Token::LineComment(comment)
+    }
+
+    fn lex_block_comment(&mut self) -> Token {
+        let mut comment = String::from("/");
+        let mut maybe_starting_block = true;
+        let mut maybe_closing_block = false;
+        let mut depth = 0;
+
+        while let Some(ch) = self.chars.next() {
+            comment.push(ch);
+            self.increment_pos(ch);
+
+            if ch == '*' {
+                if maybe_starting_block {
+                    maybe_starting_block = false;
+                    depth += 1;
+                } else {
+                    maybe_closing_block = true;
+                }
+            } else if ch == '/' {
+                if maybe_closing_block {
+                    maybe_closing_block = false;
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    maybe_starting_block = true;
+                }
+            } else {
+                maybe_starting_block = false;
+                maybe_closing_block = false;
+            }
+        }
+
+        if depth == 0 {
+            Token::BlockComment(comment)
+        } else {
+            Token::UnterminatedBlockComment(comment, depth)
         }
     }
 

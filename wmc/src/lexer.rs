@@ -24,7 +24,7 @@ pub enum Token {
     KwStruct,
 
     // More complex keywords
-    Whitespace,
+    Whitespace(String, bool),
     LineComment(String),
     BlockComment(String),
     UnterminatedBlockComment(String, u32),
@@ -201,6 +201,9 @@ impl<'a> LexerState<'a> {
                     Token::DoubleGreaterThanEqual,
                 ),
 
+                // Whitespace
+                ws @ ' ' | ws @ '\t' | ws @ '\n' | ws @ '\r' => self.lex_whitespace(ws),
+
                 // "/", "/=", or comments
                 '/' => self.lex_after_slash(),
 
@@ -273,6 +276,32 @@ impl<'a> LexerState<'a> {
         } else {
             single_ch_token
         }
+    }
+
+    fn lex_whitespace(&mut self, first_ch: char) -> Token {
+        let mut whitespace = String::new();
+        let mut has_newline = first_ch == '\n';
+        whitespace.push(first_ch);
+
+        // TODO (NLL): Convert this back to `while let Some(ch) = self.chars.peek()`
+        loop {
+            let mut next_ch = '\0';
+            match self.chars.peek() {
+                Some(&' ') => next_ch = ' ',
+                Some(&'\t') => next_ch = '\t',
+                Some(&'\n') => next_ch = '\n',
+                Some(&'\r') => next_ch = '\r',
+                _ => break,
+            }
+
+            // Consume next_ch
+            self.chars.next();
+            self.increment_pos(next_ch);
+            has_newline = has_newline || next_ch == '\n';
+            whitespace.push(next_ch);
+        }
+
+        Token::Whitespace(whitespace, has_newline)
     }
 
     fn lex_after_slash(&mut self) -> Token {

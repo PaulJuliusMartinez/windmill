@@ -24,15 +24,20 @@ pub enum Token {
     KwStruct,
 
     // More complex keywords
-    Whitespace(String, bool),
+    Whitespace { ws: String, has_newline: bool },
     LineComment(String),
     BlockComment(String),
-    UnterminatedBlockComment(String, u32),
     Identifier(String),
     DoubleQuoteLiteral(String),
     SingleQuoteLiteral(String),
     NumberLiteral(String),
     Unknown(char),
+
+    // There are all error conditions for strings.
+    UnterminatedBlockComment(String, u32),
+    // Quotes are either terminated by end of file or new lines.
+    UnterminatedDoubleQuoteLiteral { content: String, via_eof: bool },
+    UnterminatedSingleQuoteLiteral { content: String, via_eof: bool },
 
     // Multiple character tokens
     DoubleLessThanEqual,
@@ -212,6 +217,9 @@ impl<'a> LexerState<'a> {
                     self.lex_identifier_or_keyword(letter)
                 }
 
+                '"' => self.lex_quoted_string('"'),
+                '\'' => self.lex_quoted_string('\''),
+
                 _ => Token::Unknown(ch),
             };
 
@@ -285,7 +293,7 @@ impl<'a> LexerState<'a> {
 
         // TODO (NLL): Convert this back to `while let Some(ch) = self.chars.peek()`
         loop {
-            let mut next_ch = '\0';
+            let next_ch;
             match self.chars.peek() {
                 Some(&' ') => next_ch = ' ',
                 Some(&'\t') => next_ch = '\t',
@@ -301,7 +309,10 @@ impl<'a> LexerState<'a> {
             whitespace.push(next_ch);
         }
 
-        Token::Whitespace(whitespace, has_newline)
+        Token::Whitespace {
+            ws: whitespace,
+            has_newline,
+        }
     }
 
     fn lex_after_slash(&mut self) -> Token {
@@ -390,6 +401,68 @@ impl<'a> LexerState<'a> {
                     }
                 }
             }
+        }
+    }
+
+    fn lex_quoted_string(&mut self, quote_ch: char) -> Token {
+        if quote_ch != '\'' && quote_ch != '"' {
+            panic!("Must pass either ' or \" to lex_quoted_string");
+        }
+
+        let mut content = String::new();
+        let mut escaping = false;
+        while let Some(ch) = self.chars.next() {
+            self.increment_pos(ch);
+
+            match ch {
+                '"' if quote_ch == '"' => {
+                    if escaping {
+                        escaping = false;
+                    } else {
+                        return Token::DoubleQuoteLiteral(content);
+                    }
+                }
+                '\'' if quote_ch == '\'' => {
+                    if escaping {
+                        escaping = false;
+                    } else {
+                        return Token::SingleQuoteLiteral(content);
+                    }
+                }
+                '\\' => {
+                    escaping = !escaping;
+                }
+                '\n' => {
+                    if quote_ch == '"' {
+                        return Token::UnterminatedDoubleQuoteLiteral {
+                            content,
+                            via_eof: false,
+                        };
+                    } else {
+                        return Token::UnterminatedSingleQuoteLiteral {
+                            content,
+                            via_eof: false,
+                        };
+                    }
+                }
+                _ => {
+                    escaping = false;
+                }
+            }
+            // Push character after we're sure it's not the end of the quote.
+            content.push(ch);
+        }
+
+        if quote_ch == '"' {
+            return Token::UnterminatedDoubleQuoteLiteral {
+                content,
+                via_eof: true,
+            };
+        } else {
+            return Token::UnterminatedSingleQuoteLiteral {
+                content,
+                via_eof: true,
+            };
         }
     }
 }

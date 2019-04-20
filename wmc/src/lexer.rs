@@ -3,6 +3,13 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Debug, Clone)]
+pub enum NumberLiteralPrefix {
+    Binary,
+    Octal,
+    Hexadecimal,
+}
+
+#[derive(Debug, Clone)]
 pub enum Token {
     // Keywords
     KwIf,
@@ -24,20 +31,34 @@ pub enum Token {
     KwStruct,
 
     // More complex keywords
-    Whitespace { ws: String, has_newline: bool },
+    Whitespace {
+        ws: String,
+        has_newline: bool,
+    },
     LineComment(String),
     BlockComment(String),
     Identifier(String),
     DoubleQuoteLiteral(String),
     SingleQuoteLiteral(String),
-    NumberLiteral(String),
+    NumberLiteral {
+        prefix: Option<NumberLiteralPrefix>,
+        value: String,
+        exponent: Option<String>,
+        suffix: Option<String>,
+    },
     Unknown(char),
 
     // There are all error conditions for strings.
     UnterminatedBlockComment(String, u32),
     // Quotes are either terminated by end of file or new lines.
-    UnterminatedDoubleQuoteLiteral { content: String, via_eof: bool },
-    UnterminatedSingleQuoteLiteral { content: String, via_eof: bool },
+    UnterminatedDoubleQuoteLiteral {
+        content: String,
+        via_eof: bool,
+    },
+    UnterminatedSingleQuoteLiteral {
+        content: String,
+        via_eof: bool,
+    },
 
     // Multiple character tokens
     DoubleLessThanEqual,
@@ -143,6 +164,23 @@ pub fn lex(src: &str) -> Vec<LexedToken> {
     return state.tokens;
 }
 
+macro_rules! lex_digits_fn {
+    ($fn_name:ident: $( $range:pat ),+) => {
+        fn $fn_name(&mut self, value: &mut String) {
+            loop {
+                let next_ch = match self.chars.peek() {
+                    $(
+                        Some(ch @ &$range) => ch,
+                    )*
+                    _ => break,
+                };
+                value.push(*next_ch);
+                self.consume_next_ch();
+            }
+        }
+    }
+}
+
 impl<'a> LexerState<'a> {
     fn lex(&mut self) {
         while let Some(ch) = self.chars.next() {
@@ -217,6 +255,8 @@ impl<'a> LexerState<'a> {
                     self.lex_identifier_or_keyword(letter)
                 }
 
+                number @ '0'...'9' => self.lex_number(number),
+
                 '"' => self.lex_quoted_string('"'),
                 '\'' => self.lex_quoted_string('\''),
 
@@ -240,6 +280,14 @@ impl<'a> LexerState<'a> {
         }
     }
 
+    fn consume_next_ch(&mut self) {
+        if let Some(ch) = self.chars.next() {
+            self.increment_pos(ch);
+        } else {
+            panic!("Called consume when no more tokesn");
+        }
+    }
+
     fn maybe_lex_ch_eq_token(&mut self, one_ch_token: Token, two_ch_token: Token) -> Token {
         let peeked = self.chars.peek();
         if peeked.is_none() {
@@ -249,8 +297,7 @@ impl<'a> LexerState<'a> {
 
         if ch == '=' {
             // Consume =
-            self.chars.next();
-            self.increment_pos(ch);
+            self.consume_next_ch();
             two_ch_token
         } else {
             one_ch_token
@@ -273,13 +320,11 @@ impl<'a> LexerState<'a> {
 
         if next_ch == ch {
             // Consume next_ch
-            self.chars.next();
-            self.increment_pos(ch);
+            self.consume_next_ch();
             self.maybe_lex_ch_eq_token(double_ch_token, double_ch_eq_token)
         } else if next_ch == '=' {
             // Consume =
-            self.chars.next();
-            self.increment_pos(ch);
+            self.consume_next_ch();
             ch_eq_token
         } else {
             single_ch_token
@@ -293,18 +338,16 @@ impl<'a> LexerState<'a> {
 
         // TODO (NLL): Convert this back to `while let Some(ch) = self.chars.peek()`
         loop {
-            let next_ch;
-            match self.chars.peek() {
-                Some(&' ') => next_ch = ' ',
-                Some(&'\t') => next_ch = '\t',
-                Some(&'\n') => next_ch = '\n',
-                Some(&'\r') => next_ch = '\r',
+            let next_ch = match self.chars.peek() {
+                Some(&' ') => ' ',
+                Some(&'\t') => '\t',
+                Some(&'\n') => '\n',
+                Some(&'\r') => '\r',
                 _ => break,
-            }
+            };
 
             // Consume next_ch
-            self.chars.next();
-            self.increment_pos(next_ch);
+            self.consume_next_ch();
             has_newline = has_newline || next_ch == '\n';
             whitespace.push(next_ch);
         }
@@ -382,6 +425,16 @@ impl<'a> LexerState<'a> {
         let mut identifier = String::new();
         identifier.push(first_ch);
 
+        self.lex_identifier_into_string(&mut identifier);
+
+        if let Some(keyword_token) = KEYWORDS.get(identifier.as_str()) {
+            keyword_token.clone()
+        } else {
+            Token::Identifier(identifier)
+        }
+    }
+
+    fn lex_identifier_into_string(&mut self, ident: &mut String) {
         loop {
             match self.chars.peek() {
                 Some(&ch @ '_')
@@ -389,19 +442,93 @@ impl<'a> LexerState<'a> {
                 | Some(&ch @ 'A'...'Z')
                 | Some(&ch @ '0'...'9') => {
                     // Consume ch
-                    self.chars.next();
-                    self.increment_pos(ch);
-                    identifier.push(ch);
+                    self.consume_next_ch();
+                    ident.push(ch);
                 }
-                _ => {
-                    if let Some(keyword_token) = KEYWORDS.get(identifier.as_str()) {
-                        return keyword_token.clone();
-                    } else {
-                        return Token::Identifier(identifier);
-                    }
-                }
+                _ => return,
             }
         }
+    }
+
+    fn lex_number(&mut self, digit: char) -> Token {
+        let mut prefix = None;
+        let mut value = String::new();
+        let mut exponent = None;
+        let mut suffix = None;
+        value.push(digit);
+
+        let mut digit_lexer_fn: fn(&mut Self, &mut String) = LexerState::lex_digits;
+
+        // First check for prefix
+        if digit == '0' {
+            match self.chars.peek() {
+                Some(&'b') => {
+                    prefix = Some(NumberLiteralPrefix::Binary);
+                    digit_lexer_fn = LexerState::lex_binary_digits;
+                }
+                Some(&'o') => {
+                    prefix = Some(NumberLiteralPrefix::Octal);
+                    digit_lexer_fn = LexerState::lex_octal_digits;
+                }
+                Some(&'x') => {
+                    prefix = Some(NumberLiteralPrefix::Hexadecimal);
+                    digit_lexer_fn = LexerState::lex_hexadecimal_digits;
+                }
+                _ => (),
+            }
+
+            if prefix.is_some() {
+                self.consume_next_ch();
+                value = String::new();
+            }
+        }
+
+        digit_lexer_fn(self, &mut value);
+
+        // Check for decimal.
+        if let Some(&'.') = self.chars.peek() {
+            value.push('.');
+            self.consume_next_ch();
+            digit_lexer_fn(self, &mut value);
+        }
+
+        // Check for exponent.
+        if let Some('e') | Some('E') = self.chars.peek() {
+            exponent = Some(self.lex_exponent());
+        }
+
+        // Check for suffix.
+        let mut suffix_str = String::new();
+        self.lex_identifier_into_string(&mut suffix_str);
+        if !suffix_str.is_empty() {
+            suffix = Some(suffix_str);
+        }
+
+        return Token::NumberLiteral {
+            prefix,
+            value,
+            exponent,
+            suffix,
+        };
+    }
+
+    lex_digits_fn!(lex_binary_digits: '0'...'1', '_');
+    lex_digits_fn!(lex_octal_digits: '0'...'7', '_');
+    lex_digits_fn!(lex_hexadecimal_digits: '0'...'9', 'a'...'f', 'A'...'F', '_');
+    lex_digits_fn!(lex_digits: '0'...'9', '_');
+
+    fn lex_exponent(&mut self) -> String {
+        let mut exponent = String::new();
+        exponent.push(self.chars.next().unwrap());
+
+        if let Some(sign @ &'+') | Some(sign @ &'-') = self.chars.peek() {
+            exponent.push(*sign);
+            self.consume_next_ch();
+        }
+
+        self.lex_digits(&mut exponent);
+
+        exponent
     }
 
     fn lex_quoted_string(&mut self, quote_ch: char) -> Token {

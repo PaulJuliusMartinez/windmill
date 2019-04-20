@@ -142,15 +142,64 @@ pub struct LexedToken {
 }
 
 struct LexerState<'a> {
-    chars: Peekable<Chars<'a>>,
+    chars: RewindableCharIterator<'a>,
     line_no: i32,
     col_no: i32,
     tokens: Vec<LexedToken>,
 }
 
+struct RewindableCharIterator<'a> {
+    chars: Chars<'a>,
+    last_ch: Option<Option<char>>,
+    peeked_ch: Option<Option<char>>,
+    rewound: bool,
+}
+
+impl<'a> RewindableCharIterator<'a> {
+    fn new(chars: Chars<'a>) -> RewindableCharIterator<'a> {
+        RewindableCharIterator {
+            chars,
+            last_ch: None,
+            peeked_ch: None,
+            rewound: false,
+        }
+    }
+
+    fn next(&mut self) -> Option<char> {
+        if self.rewound {
+            self.rewound = false;
+            self.last_ch.unwrap()
+        } else {
+            self.last_ch = self.peeked_ch.take().or_else(|| Some(self.chars.next()));
+            self.last_ch.unwrap()
+        }
+    }
+
+    fn peek(&mut self) -> Option<char> {
+        if self.rewound {
+            self.last_ch.unwrap()
+        } else {
+            match self.peeked_ch {
+                Some(peeked) => peeked,
+                None => {
+                    self.peeked_ch = Some(self.chars.next());
+                    self.peeked_ch.unwrap()
+                }
+            }
+        }
+    }
+
+    fn rewind(&mut self) {
+        if self.rewound {
+            panic!("Can only rewind once.");
+        }
+        self.rewound = true
+    }
+}
+
 pub fn lex(src: &str) -> Vec<LexedToken> {
     let mut state = LexerState {
-        chars: src.chars().peekable(),
+        chars: RewindableCharIterator::new(src.chars()),
         line_no: 1,
         col_no: 1,
         tokens: Vec::new(),
@@ -170,11 +219,11 @@ macro_rules! lex_digits_fn {
             loop {
                 let next_ch = match self.chars.peek() {
                     $(
-                        Some(ch @ &$range) => ch,
+                        Some(ch @ $range) => ch,
                     )*
                     _ => break,
                 };
-                value.push(*next_ch);
+                value.push(next_ch);
                 self.consume_next_ch();
             }
         }
@@ -289,18 +338,13 @@ impl<'a> LexerState<'a> {
     }
 
     fn maybe_lex_ch_eq_token(&mut self, one_ch_token: Token, two_ch_token: Token) -> Token {
-        let peeked = self.chars.peek();
-        if peeked.is_none() {
-            return one_ch_token;
-        }
-        let ch = *peeked.unwrap();
-
-        if ch == '=' {
-            // Consume =
-            self.consume_next_ch();
-            two_ch_token
-        } else {
-            one_ch_token
+        match self.chars.peek() {
+            Some('=') => {
+                // Consume =
+                self.consume_next_ch();
+                two_ch_token
+            }
+            _ => one_ch_token,
         }
     }
 
@@ -316,7 +360,7 @@ impl<'a> LexerState<'a> {
         if peeked.is_none() {
             return single_ch_token;
         }
-        let next_ch = *peeked.unwrap();
+        let next_ch = peeked.unwrap();
 
         if next_ch == ch {
             // Consume next_ch
@@ -336,20 +380,16 @@ impl<'a> LexerState<'a> {
         let mut has_newline = first_ch == '\n';
         whitespace.push(first_ch);
 
-        // TODO (NLL): Convert this back to `while let Some(ch) = self.chars.peek()`
-        loop {
-            let next_ch = match self.chars.peek() {
-                Some(&' ') => ' ',
-                Some(&'\t') => '\t',
-                Some(&'\n') => '\n',
-                Some(&'\r') => '\r',
+        while let Some(ch) = self.chars.peek() {
+            match ch {
+                ' ' | '\t' | '\n' | '\r' => (),
                 _ => break,
             };
 
             // Consume next_ch
             self.consume_next_ch();
-            has_newline = has_newline || next_ch == '\n';
-            whitespace.push(next_ch);
+            has_newline = has_newline || ch == '\n';
+            whitespace.push(ch);
         }
 
         Token::Whitespace {
@@ -360,9 +400,9 @@ impl<'a> LexerState<'a> {
 
     fn lex_after_slash(&mut self) -> Token {
         match self.chars.peek() {
-            Some(&'=') => Token::DivideEqual,
-            Some(&'/') => self.lex_line_comment(),
-            Some(&'*') => self.lex_block_comment(),
+            Some('=') => Token::DivideEqual,
+            Some('/') => self.lex_line_comment(),
+            Some('*') => self.lex_block_comment(),
             _ => Token::Slash,
         }
     }
@@ -435,12 +475,9 @@ impl<'a> LexerState<'a> {
     }
 
     fn lex_identifier_into_string(&mut self, ident: &mut String) {
-        loop {
-            match self.chars.peek() {
-                Some(&ch @ '_')
-                | Some(&ch @ 'a'...'z')
-                | Some(&ch @ 'A'...'Z')
-                | Some(&ch @ '0'...'9') => {
+        while let Some(ch) = self.chars.peek() {
+            match ch {
+                '_' | 'a'...'z' | 'A'...'Z' | '0'...'9' => {
                     // Consume ch
                     self.consume_next_ch();
                     ident.push(ch);
@@ -462,15 +499,15 @@ impl<'a> LexerState<'a> {
         // First check for prefix
         if digit == '0' {
             match self.chars.peek() {
-                Some(&'b') => {
+                Some('b') => {
                     prefix = Some(NumberLiteralPrefix::Binary);
                     digit_lexer_fn = LexerState::lex_binary_digits;
                 }
-                Some(&'o') => {
+                Some('o') => {
                     prefix = Some(NumberLiteralPrefix::Octal);
                     digit_lexer_fn = LexerState::lex_octal_digits;
                 }
-                Some(&'x') => {
+                Some('x') => {
                     prefix = Some(NumberLiteralPrefix::Hexadecimal);
                     digit_lexer_fn = LexerState::lex_hexadecimal_digits;
                 }
@@ -486,9 +523,20 @@ impl<'a> LexerState<'a> {
         digit_lexer_fn(self, &mut value);
 
         // Check for decimal.
-        if let Some(&'.') = self.chars.peek() {
+        if let Some('.') = self.chars.peek() {
+            self.chars.next();
+            if let Some('a'...'z') | Some('A'...'Z') | Some('_') = self.chars.peek() {
+                self.chars.rewind();
+                return Token::NumberLiteral {
+                    prefix,
+                    value,
+                    exponent,
+                    suffix,
+                };
+            }
+            self.increment_pos('.');
             value.push('.');
-            self.consume_next_ch();
+
             digit_lexer_fn(self, &mut value);
         }
 
@@ -521,8 +569,8 @@ impl<'a> LexerState<'a> {
         let mut exponent = String::new();
         exponent.push(self.chars.next().unwrap());
 
-        if let Some(sign @ &'+') | Some(sign @ &'-') = self.chars.peek() {
-            exponent.push(*sign);
+        if let Some(sign @ '+') | Some(sign @ '-') = self.chars.peek() {
+            exponent.push(sign);
             self.consume_next_ch();
         }
 

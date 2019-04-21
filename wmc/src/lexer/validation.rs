@@ -46,6 +46,7 @@ pub enum LexErrorKind {
     UnterminatedBlockComment(String, u32),
     // Numbers
     NoNumbers(NumberLiteral, String),
+    InvalidDigitForLiteral(NumberLiteral, char),
     InvalidNumericSuffix(NumberLiteral, String, String),
     NonDecimalFloatingPoint(NumberLiteral, String),
     IntegerSuffixForFloatingPoint(NumberLiteral, String, String),
@@ -190,7 +191,10 @@ pub fn validate_number_literal(
     let radix = style.radix();
 
     for ch in value.chars() {
-        has_num = has_num || ch.is_digit(radix);
+        if ch != '_' && ch != '.' && !ch.is_digit(radix) {
+            return Err(LexErrorKind::InvalidDigitForLiteral(style, ch));
+        }
+        has_num = has_num || ch != '_';
         has_decimal = has_decimal || ch == '.';
     }
 

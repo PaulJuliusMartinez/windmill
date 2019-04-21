@@ -378,11 +378,11 @@ impl<'a, 'b> LexerState<'a, 'b> {
             match self.chars.peek() {
                 Some('b') => {
                     style = NumberLiteral::Binary;
-                    digit_lexer_fn = LexerState::lex_binary_digits;
+                    digit_lexer_fn = LexerState::lex_digits;
                 }
                 Some('o') => {
                     style = NumberLiteral::Octal;
-                    digit_lexer_fn = LexerState::lex_octal_digits;
+                    digit_lexer_fn = LexerState::lex_digits;
                 }
                 Some('x') => {
                     style = NumberLiteral::Hexadecimal;
@@ -429,8 +429,6 @@ impl<'a, 'b> LexerState<'a, 'b> {
         validation::validate_number_literal(style, value, suffix)
     }
 
-    lex_digits_fn!(lex_binary_digits: '0'...'1', '_');
-    lex_digits_fn!(lex_octal_digits: '0'...'7', '_');
     lex_digits_fn!(lex_hexadecimal_digits: '0'...'9', 'a'...'f', 'A'...'F', '_');
     lex_digits_fn!(lex_digits: '0'...'9', '_');
 

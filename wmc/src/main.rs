@@ -6,7 +6,7 @@ use std::{env, fs};
 mod lexer;
 
 fn main() {
-    let args: Vec<_> = env::args_os().collect();
+    let args: Vec<_> = env::args().collect();
     if args.len() < 2 {
         println!("Please provide a filename.");
         return;
@@ -19,5 +19,5 @@ fn main() {
     }
 
     let src = src.unwrap();
-    lexer::lex(&src);
+    lexer::lex(&src, &args[1]);
 }

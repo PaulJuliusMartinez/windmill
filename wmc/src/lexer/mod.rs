@@ -1,151 +1,25 @@
-use std::collections::HashMap;
-use std::iter::Peekable;
 use std::str::Chars;
 
-#[derive(Debug, Clone)]
-pub enum NumberLiteralPrefix {
-    Binary,
-    Octal,
-    Hexadecimal,
-}
+mod lex_error;
+mod token;
+mod validation;
 
-#[derive(Debug, Clone)]
-pub enum Token {
-    // Keywords
-    KwIf,
-    KwElse,
-    KwWhile,
-    KwBreak,
-    KwContinue,
-    KwFor,
-    KwReturn,
-
-    KwTrue,
-    KwFalse,
-
-    KwFn,
-    KwLet,
-    KwSet,
-    KwSelf,
-    KwSelfType,
-    KwStruct,
-
-    // More complex keywords
-    Whitespace {
-        ws: String,
-        has_newline: bool,
-    },
-    LineComment(String),
-    BlockComment(String),
-    Identifier(String),
-    DoubleQuoteLiteral(String),
-    SingleQuoteLiteral(String),
-    NumberLiteral {
-        prefix: Option<NumberLiteralPrefix>,
-        value: String,
-        exponent: Option<String>,
-        suffix: Option<String>,
-    },
-    Unknown(char),
-
-    // There are all error conditions for strings.
-    UnterminatedBlockComment(String, u32),
-    // Quotes are either terminated by end of file or new lines.
-    UnterminatedDoubleQuoteLiteral {
-        content: String,
-        via_eof: bool,
-    },
-    UnterminatedSingleQuoteLiteral {
-        content: String,
-        via_eof: bool,
-    },
-
-    // Multiple character tokens
-    DoubleLessThanEqual,
-    DoubleGreaterThanEqual,
-    DoubleAmpersandEqual,
-    DoubleVerticalBarEqual,
-
-    DoubleAmpersand,
-    DoubleVerticalBar,
-    DoubleLessThan,
-    DoubleGreaterThan,
-    PlusEqual,
-    MinusEqual,
-    TimesEqual,
-    DivideEqual,
-    PercentEqual,
-    CaretEqual,
-    AmpersandEqual,
-    VerticalBarEqual,
-    DoubleEqual,
-    NotEqual,
-    LessThanEqual,
-    GreaterThanEqual,
-
-    // Single character tokens
-    ExclamationPoint,
-    Pound,
-    // Dollar,
-    Percent,
-    Ampersand,
-    LeftParen,
-    RightParen,
-    Asterisk,
-    Plus,
-    Comma,
-    Hyphen,
-    Dot,
-    Slash,
-    Colon,
-    Semicolon,
-    LessThan,
-    Equal,
-    GreaterThan,
-    Question,
-    // At,
-    LeftSquare,
-    RightSquare,
-    Caret,
-    LeftCurly,
-    VerticalBar,
-    RightCurly,
-}
-
-lazy_static! {
-    static ref KEYWORDS: HashMap<&'static str, Token> = {
-        let mut m = HashMap::new();
-        m.insert("if", Token::KwIf);
-        m.insert("else", Token::KwElse);
-        m.insert("while", Token::KwWhile);
-        m.insert("break", Token::KwBreak);
-        m.insert("continue", Token::KwContinue);
-        m.insert("for", Token::KwFor);
-        m.insert("return", Token::KwReturn);
-        m.insert("true", Token::KwTrue);
-        m.insert("false", Token::KwFalse);
-        m.insert("fn", Token::KwFn);
-        m.insert("let", Token::KwLet);
-        m.insert("set", Token::KwSet);
-        m.insert("self", Token::KwSelf);
-        m.insert("selfType", Token::KwSelfType);
-        m.insert("struct", Token::KwStruct);
-        m
-    };
-}
+use lex_error::*;
+use token::{NumberLiteral, Token, KEYWORDS};
 
 #[derive(Debug)]
 pub struct LexedToken {
     token: Token,
-    line_no: i32,
-    col_no: i32,
+    line_no: u32,
+    col_no: u32,
 }
 
-struct LexerState<'a> {
+struct LexerState<'a, 'b> {
     chars: RewindableCharIterator<'a>,
-    line_no: i32,
-    col_no: i32,
+    line_no: u32,
+    col_no: u32,
     tokens: Vec<LexedToken>,
+    errors: Vec<LexError<'b>>,
 }
 
 struct RewindableCharIterator<'a> {
@@ -197,20 +71,22 @@ impl<'a> RewindableCharIterator<'a> {
     }
 }
 
-pub fn lex(src: &str) -> Vec<LexedToken> {
+type LexResult = Result<Token, LexErrorKind>;
+
+pub fn lex<'a, 'b>(src: &'a str, filename: &'b str) -> (Vec<LexedToken>, Vec<LexError<'b>>) {
     let mut state = LexerState {
         chars: RewindableCharIterator::new(src.chars()),
         line_no: 1,
         col_no: 1,
         tokens: Vec::new(),
+        errors: Vec::new(),
     };
 
-    println!("Lexing");
-    state.lex();
-    println!("Lexed");
-    println!("{:#?}", state.tokens);
+    state.lex(filename);
+    validation::check_for_lexer_errors(&state.tokens);
+    println!("{:?}", state.errors);
 
-    return state.tokens;
+    return (state.tokens, state.errors);
 }
 
 macro_rules! lex_digits_fn {
@@ -230,8 +106,8 @@ macro_rules! lex_digits_fn {
     }
 }
 
-impl<'a> LexerState<'a> {
-    fn lex(&mut self) {
+impl<'a, 'b> LexerState<'a, 'b> {
+    fn lex(&mut self, filename: &'b str) {
         while let Some(ch) = self.chars.next() {
             let start_line_no = self.line_no;
             let start_col_no = self.col_no;
@@ -239,84 +115,94 @@ impl<'a> LexerState<'a> {
 
             let token = match ch {
                 // Simple tokens:
-                '#' => Token::Pound,
-                // '$' => Token::Dollar,
-                ',' => Token::Comma,
-                '.' => Token::Dot,
-                ':' => Token::Colon,
-                ';' => Token::Semicolon,
-                '?' => Token::Question,
-                '[' => Token::LeftSquare,
-                ']' => Token::RightSquare,
-                '(' => Token::LeftParen,
-                ')' => Token::RightParen,
-                '{' => Token::LeftCurly,
-                '}' => Token::RightCurly,
-                // '@' => Token::At,
+                '#' => Ok(Token::Pound),
+                // '$' => Ok(Token::Dollar),
+                ',' => Ok(Token::Comma),
+                '.' => Ok(Token::Dot),
+                ':' => Ok(Token::Colon),
+                ';' => Ok(Token::Semicolon),
+                '?' => Ok(Token::Question),
+                '[' => Ok(Token::LeftSquare),
+                ']' => Ok(Token::RightSquare),
+                '(' => Ok(Token::LeftParen),
+                ')' => Ok(Token::RightParen),
+                '{' => Ok(Token::LeftCurly),
+                '}' => Ok(Token::RightCurly),
+                // '@' => Ok(Token::At),
 
                 // Two character combinations.
-                '!' => self.maybe_lex_ch_eq_token(Token::ExclamationPoint, Token::NotEqual),
-                '%' => self.maybe_lex_ch_eq_token(Token::Percent, Token::PercentEqual),
-                '*' => self.maybe_lex_ch_eq_token(Token::Asterisk, Token::TimesEqual),
-                '+' => self.maybe_lex_ch_eq_token(Token::Plus, Token::PlusEqual),
-                '-' => self.maybe_lex_ch_eq_token(Token::Hyphen, Token::MinusEqual),
-                '^' => self.maybe_lex_ch_eq_token(Token::Caret, Token::CaretEqual),
-                '=' => self.maybe_lex_ch_eq_token(Token::Equal, Token::DoubleEqual),
+                '!' => Ok(self.maybe_lex_ch_eq_token(Token::ExclamationPoint, Token::NotEqual)),
+                '%' => Ok(self.maybe_lex_ch_eq_token(Token::Percent, Token::PercentEqual)),
+                '*' => Ok(self.maybe_lex_ch_eq_token(Token::Asterisk, Token::TimesEqual)),
+                '+' => Ok(self.maybe_lex_ch_eq_token(Token::Plus, Token::PlusEqual)),
+                '-' => Ok(self.maybe_lex_ch_eq_token(Token::Hyphen, Token::MinusEqual)),
+                '^' => Ok(self.maybe_lex_ch_eq_token(Token::Caret, Token::CaretEqual)),
+                '=' => Ok(self.maybe_lex_ch_eq_token(Token::Equal, Token::DoubleEqual)),
 
                 // Two/three character combinations with eq.
-                '&' => self.lex_two_or_three_ch_eq_combination(
+                '&' => Ok(self.lex_two_or_three_ch_eq_combination(
                     '&',
                     Token::Ampersand,
                     Token::DoubleAmpersand,
                     Token::AmpersandEqual,
                     Token::DoubleAmpersandEqual,
-                ),
-                '|' => self.lex_two_or_three_ch_eq_combination(
+                )),
+                '|' => Ok(self.lex_two_or_three_ch_eq_combination(
                     '|',
                     Token::VerticalBar,
                     Token::DoubleVerticalBar,
                     Token::VerticalBarEqual,
                     Token::DoubleVerticalBarEqual,
-                ),
-                '<' => self.lex_two_or_three_ch_eq_combination(
+                )),
+                '<' => Ok(self.lex_two_or_three_ch_eq_combination(
                     '<',
                     Token::LessThan,
                     Token::DoubleLessThan,
                     Token::LessThanEqual,
                     Token::DoubleLessThanEqual,
-                ),
-                '>' => self.lex_two_or_three_ch_eq_combination(
+                )),
+                '>' => Ok(self.lex_two_or_three_ch_eq_combination(
                     '>',
                     Token::GreaterThan,
                     Token::DoubleGreaterThan,
                     Token::GreaterThanEqual,
                     Token::DoubleGreaterThanEqual,
-                ),
+                )),
 
                 // Whitespace
-                ws @ ' ' | ws @ '\t' | ws @ '\n' | ws @ '\r' => self.lex_whitespace(ws),
+                ws @ ' ' | ws @ '\t' | ws @ '\n' | ws @ '\r' => Ok(self.lex_whitespace(ws)),
 
                 // "/", "/=", or comments
                 '/' => self.lex_after_slash(),
 
                 // Lex identifiers and keywords.
                 letter @ '_' | letter @ 'a'...'z' | letter @ 'A'...'Z' => {
-                    self.lex_identifier_or_keyword(letter)
+                    Ok(self.lex_identifier_or_keyword(letter))
                 }
 
-                number @ '0'...'9' => self.lex_number(number),
+                number @ '0'...'9' => Ok(self.lex_number(number)),
 
                 '"' => self.lex_quoted_string('"'),
                 '\'' => self.lex_quoted_string('\''),
 
-                _ => Token::Unknown(ch),
+                _ => Err(LexErrorKind::UnknownChar(ch)),
             };
 
-            self.tokens.push(LexedToken {
-                token,
-                line_no: start_line_no,
-                col_no: start_col_no,
-            })
+            match token {
+                Ok(lexed_token) => self.tokens.push(LexedToken {
+                    token: lexed_token,
+                    line_no: start_line_no,
+                    col_no: start_col_no,
+                }),
+                Err(kind) => self.errors.push(LexError {
+                    location: LexErrorLocation {
+                        filename,
+                        line_no: start_line_no,
+                        col_no: start_col_no,
+                    },
+                    kind,
+                }),
+            }
         }
     }
 
@@ -377,7 +263,6 @@ impl<'a> LexerState<'a> {
 
     fn lex_whitespace(&mut self, first_ch: char) -> Token {
         let mut whitespace = String::new();
-        let mut has_newline = first_ch == '\n';
         whitespace.push(first_ch);
 
         while let Some(ch) = self.chars.peek() {
@@ -388,22 +273,18 @@ impl<'a> LexerState<'a> {
 
             // Consume next_ch
             self.consume_next_ch();
-            has_newline = has_newline || ch == '\n';
             whitespace.push(ch);
         }
 
-        Token::Whitespace {
-            ws: whitespace,
-            has_newline,
-        }
+        Token::Whitespace(whitespace)
     }
 
-    fn lex_after_slash(&mut self) -> Token {
+    fn lex_after_slash(&mut self) -> LexResult {
         match self.chars.peek() {
-            Some('=') => Token::DivideEqual,
-            Some('/') => self.lex_line_comment(),
+            Some('=') => Ok(Token::DivideEqual),
+            Some('/') => Ok(self.lex_line_comment()),
             Some('*') => self.lex_block_comment(),
-            _ => Token::Slash,
+            _ => Ok(Token::Slash),
         }
     }
 
@@ -421,7 +302,7 @@ impl<'a> LexerState<'a> {
         Token::LineComment(comment)
     }
 
-    fn lex_block_comment(&mut self) -> Token {
+    fn lex_block_comment(&mut self) -> LexResult {
         let mut comment = String::from("/");
         let mut maybe_starting_block = true;
         let mut maybe_closing_block = false;
@@ -455,9 +336,9 @@ impl<'a> LexerState<'a> {
         }
 
         if depth == 0 {
-            Token::BlockComment(comment)
+            Ok(Token::BlockComment(comment))
         } else {
-            Token::UnterminatedBlockComment(comment, depth)
+            Err(LexErrorKind::UnterminatedBlockComment(comment, depth))
         }
     }
 
@@ -488,9 +369,8 @@ impl<'a> LexerState<'a> {
     }
 
     fn lex_number(&mut self, digit: char) -> Token {
-        let mut prefix = None;
+        let mut style = NumberLiteral::Decimal;
         let mut value = String::new();
-        let mut exponent = None;
         let mut suffix = None;
         value.push(digit);
 
@@ -500,21 +380,21 @@ impl<'a> LexerState<'a> {
         if digit == '0' {
             match self.chars.peek() {
                 Some('b') => {
-                    prefix = Some(NumberLiteralPrefix::Binary);
+                    style = NumberLiteral::Binary;
                     digit_lexer_fn = LexerState::lex_binary_digits;
                 }
                 Some('o') => {
-                    prefix = Some(NumberLiteralPrefix::Octal);
+                    style = NumberLiteral::Octal;
                     digit_lexer_fn = LexerState::lex_octal_digits;
                 }
                 Some('x') => {
-                    prefix = Some(NumberLiteralPrefix::Hexadecimal);
+                    style = NumberLiteral::Hexadecimal;
                     digit_lexer_fn = LexerState::lex_hexadecimal_digits;
                 }
                 _ => (),
             }
 
-            if prefix.is_some() {
+            if style != NumberLiteral::Decimal {
                 self.consume_next_ch();
                 value = String::new();
             }
@@ -530,9 +410,8 @@ impl<'a> LexerState<'a> {
             if let Some('a'...'z') | Some('A'...'Z') | Some('_') = self.chars.peek() {
                 self.chars.rewind();
                 return Token::NumberLiteral {
-                    prefix,
+                    style,
                     value,
-                    exponent,
                     suffix,
                 };
             }
@@ -544,7 +423,7 @@ impl<'a> LexerState<'a> {
 
         // Check for exponent.
         if let Some('e') | Some('E') = self.chars.peek() {
-            exponent = Some(self.lex_exponent());
+            self.lex_exponent(&mut value);
         }
 
         // Check for suffix.
@@ -555,9 +434,8 @@ impl<'a> LexerState<'a> {
         }
 
         return Token::NumberLiteral {
-            prefix,
+            style,
             value,
-            exponent,
             suffix,
         };
     }
@@ -567,21 +445,18 @@ impl<'a> LexerState<'a> {
     lex_digits_fn!(lex_hexadecimal_digits: '0'...'9', 'a'...'f', 'A'...'F', '_');
     lex_digits_fn!(lex_digits: '0'...'9', '_');
 
-    fn lex_exponent(&mut self) -> String {
-        let mut exponent = String::new();
-        exponent.push(self.chars.next().unwrap());
+    fn lex_exponent(&mut self, value: &mut String) {
+        value.push(self.chars.next().unwrap());
 
         if let Some(sign @ '+') | Some(sign @ '-') = self.chars.peek() {
-            exponent.push(sign);
+            value.push(sign);
             self.consume_next_ch();
         }
 
-        self.lex_digits(&mut exponent);
-
-        exponent
+        self.lex_digits(value);
     }
 
-    fn lex_quoted_string(&mut self, quote_ch: char) -> Token {
+    fn lex_quoted_string(&mut self, quote_ch: char) -> LexResult {
         if quote_ch != '\'' && quote_ch != '"' {
             panic!("Must pass either ' or \" to lex_quoted_string");
         }
@@ -596,31 +471,25 @@ impl<'a> LexerState<'a> {
                     if escaping {
                         escaping = false;
                     } else {
-                        return Token::DoubleQuoteLiteral(content);
+                        return validation::validate_double_quote_literal(content);
                     }
                 }
                 '\'' if quote_ch == '\'' => {
                     if escaping {
                         escaping = false;
                     } else {
-                        return Token::SingleQuoteLiteral(content);
+                        return validation::validate_single_quote_literal(content);
                     }
                 }
                 '\\' => {
                     escaping = !escaping;
                 }
                 '\n' => {
-                    if quote_ch == '"' {
-                        return Token::UnterminatedDoubleQuoteLiteral {
-                            content,
-                            via_eof: false,
-                        };
-                    } else {
-                        return Token::UnterminatedSingleQuoteLiteral {
-                            content,
-                            via_eof: false,
-                        };
-                    }
+                    return Err(LexErrorKind::UnterminatedQuote {
+                        content,
+                        via_eof: false,
+                        is_double: quote_ch == '"',
+                    });
                 }
                 _ => {
                     escaping = false;
@@ -630,16 +499,10 @@ impl<'a> LexerState<'a> {
             content.push(ch);
         }
 
-        if quote_ch == '"' {
-            return Token::UnterminatedDoubleQuoteLiteral {
-                content,
-                via_eof: true,
-            };
-        } else {
-            return Token::UnterminatedSingleQuoteLiteral {
-                content,
-                via_eof: true,
-            };
-        }
+        Err(LexErrorKind::UnterminatedQuote {
+            content,
+            via_eof: true,
+            is_double: quote_ch == '"',
+        })
     }
 }

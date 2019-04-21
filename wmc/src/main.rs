@@ -19,5 +19,12 @@ fn main() {
     }
 
     let src = src.unwrap();
-    lexer::lex(&src, &args[1]);
+    let (tokens, lex_errors) = lexer::lex(&src, &args[1]);
+    if !lex_errors.is_empty() {
+        for err in lex_errors.iter().rev() {
+            err.eprint();
+        }
+        eprintln!("Compilation failed due to lexical errors.");
+        return;
+    }
 }

@@ -17,6 +17,24 @@ impl NumberLiteral {
             NumberLiteral::Hexadecimal => 16,
         }
     }
+
+    pub fn prefix(&self) -> &'static str {
+        match self {
+            NumberLiteral::Binary => "0b",
+            NumberLiteral::Octal => "0o",
+            NumberLiteral::Decimal => "",
+            NumberLiteral::Hexadecimal => "0x",
+        }
+    }
+
+    pub fn to_s(&self) -> &'static str {
+        match self {
+            NumberLiteral::Binary => "binary",
+            NumberLiteral::Octal => "octal",
+            NumberLiteral::Decimal => "decimal",
+            NumberLiteral::Hexadecimal => "hexadecimal",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -51,19 +69,6 @@ pub enum Token {
         style: NumberLiteral,
         value: String,
         suffix: Option<String>,
-    },
-    Unknown(char),
-
-    // There are all error conditions for strings.
-    UnterminatedBlockComment(String, u32),
-    // Quotes are either terminated by end of file or new lines.
-    UnterminatedDoubleQuoteLiteral {
-        content: String,
-        via_eof: bool,
-    },
-    UnterminatedSingleQuoteLiteral {
-        content: String,
-        via_eof: bool,
     },
 
     // Multiple character tokens

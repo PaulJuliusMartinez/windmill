@@ -80,8 +80,6 @@ pub fn lex<'a, 'b>(src: &'a str, filename: &'b str) -> (Vec<LexedToken>, Vec<Lex
     };
 
     state.lex(filename);
-    validation::check_for_lexer_errors(&state.tokens);
-    println!("{:?}", state.errors);
 
     return (state.tokens, state.errors);
 }

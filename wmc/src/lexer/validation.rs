@@ -1,7 +1,7 @@
 use std::char;
 use std::str::Chars;
 
-use crate::lexer::{LexedToken, NumberLiteral, Token};
+use crate::lexer::{NumberLiteral, Token};
 
 #[derive(Debug)]
 pub struct LexError<'a> {
@@ -49,16 +49,10 @@ pub enum LexErrorKind {
     InvalidDigitForLiteral(NumberLiteral, char),
     InvalidNumericSuffix(NumberLiteral, String, String),
     NonDecimalFloatingPoint(NumberLiteral, String),
-    IntegerSuffixForFloatingPoint(NumberLiteral, String, String),
+    IntegerSuffixForFloatingPoint(String, String),
 }
 
 pub type LexResult = Result<Token, LexErrorKind>;
-
-pub fn check_for_lexer_errors(tokens: &[LexedToken]) {
-    for token in tokens.iter() {
-        println!("{:?}", token);
-    }
-}
 
 pub fn validate_double_quote_literal(content: String) -> LexResult {
     match validate_quoted_content(&content, true) {
@@ -222,10 +216,9 @@ pub fn validate_number_literal(
 
     let suffix = suffix.unwrap();
     let (is_integer_suffix, is_floating_point_suffix) = suffix_type(&suffix);
+
     if has_decimal && is_integer_suffix {
-        return Err(LexErrorKind::IntegerSuffixForFloatingPoint(
-            style, value, suffix,
-        ));
+        return Err(LexErrorKind::IntegerSuffixForFloatingPoint(value, suffix));
     }
 
     if style != NumberLiteral::Decimal && is_floating_point_suffix {
@@ -251,5 +244,137 @@ fn suffix_type(s: &str) -> (bool, bool) {
         }
         "f32" | "f64" => (false, true),
         _ => (false, false),
+    }
+}
+
+impl LexErrorKind {
+    fn offset(&self) -> u32 {
+        match self {
+            LexErrorKind::QuoteUnknownEscape { index, .. } => *index,
+            LexErrorKind::QuoteMalformedUnicodeEscape { index, .. } => *index,
+            LexErrorKind::QuoteInvalidEscapedUnicodeCodepoint { index, .. } => *index,
+            _ => 0,
+        }
+    }
+
+    fn quote_type(is_double: bool) -> &'static str {
+        if is_double {
+            "string literal"
+        } else {
+            "character literal"
+        }
+    }
+
+    fn eprint(&self) {
+        match self {
+            LexErrorKind::UnknownChar(ch) => {
+                eprintln!("Unknown character: '{}'", ch);
+            }
+            LexErrorKind::QuoteUnknownEscape {
+                escape_char,
+                is_double,
+                ..
+            } => {
+                eprintln!(
+                    "Unknown escape character in {}: '{}'",
+                    LexErrorKind::quote_type(*is_double),
+                    escape_char,
+                );
+            }
+            LexErrorKind::QuoteMalformedUnicodeEscape {
+                unexpected_char,
+                is_double,
+                ..
+            } => match unexpected_char {
+                None => eprintln!("Unterminated Unicode escape."),
+                Some(ch) => {
+                    eprintln!("Unexpected character in Unicode escape sequence: '{}'", ch);
+                }
+            },
+            LexErrorKind::QuoteInvalidEscapedUnicodeCodepoint {
+                codepoint,
+                is_double,
+                ..
+            } => {
+                eprintln!(
+                    "Invalid Unicode codepoint; expected hexadecimal \
+                     value between 0 and 10FFFF: {}",
+                    codepoint,
+                );
+            }
+            LexErrorKind::UnterminatedQuote {
+                content,
+                via_eof,
+                is_double,
+            } => {
+                if *via_eof {
+                    eprintln!(
+                        "EOF encountered during {}: \"{}\"",
+                        LexErrorKind::quote_type(*is_double),
+                        content
+                    );
+                } else {
+                    eprintln!(
+                        "Newline encountered during {}: \"{}",
+                        LexErrorKind::quote_type(*is_double),
+                        content
+                    );
+                }
+            }
+            LexErrorKind::SingleQuoteNotSingleCharacter(s) => {
+                eprintln!(
+                    "Character literal doesn't contain a single character: '{}'",
+                    s
+                );
+            }
+            LexErrorKind::UnterminatedBlockComment(_, _) => {
+                eprintln!("EOF encountered during multi-line block comment");
+            }
+            LexErrorKind::NoNumbers(style, s) => {
+                eprintln!(
+                    "{} literal requires at least one digit: {}{}",
+                    style.to_s(),
+                    style.prefix(),
+                    s
+                );
+            }
+            LexErrorKind::InvalidDigitForLiteral(style, ch) => {
+                eprintln!("Invalid digit in {} number literal: {}", style.to_s(), ch);
+            }
+            LexErrorKind::InvalidNumericSuffix(style, num, suffix) => {
+                eprintln!(
+                    "Unknown numeric suffix \"{}\" in {} literal {}{}",
+                    suffix,
+                    style.to_s(),
+                    num,
+                    suffix,
+                );
+            }
+            LexErrorKind::NonDecimalFloatingPoint(style, num_str) => {
+                eprintln!(
+                    "Floating point {} literals are not supported: {}",
+                    style.to_s(),
+                    num_str,
+                );
+            }
+            LexErrorKind::IntegerSuffixForFloatingPoint(num_str, suffix) => {
+                eprintln!(
+                    "Invalid integer suffix \"{}\" for floating point literal {}{}",
+                    suffix, num_str, suffix,
+                );
+            }
+        }
+    }
+}
+
+impl<'a> LexError<'a> {
+    pub fn eprint(&'a self) {
+        let LexErrorLocation {
+            filename,
+            line_no,
+            col_no,
+        } = self.location;
+        eprint!("{}:{}:{} ", filename, line_no, col_no + self.kind.offset());
+        self.kind.eprint();
     }
 }

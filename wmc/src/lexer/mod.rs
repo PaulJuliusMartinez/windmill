@@ -1,11 +1,10 @@
 use std::str::Chars;
 
-mod lex_error;
 mod token;
 mod validation;
 
-use lex_error::*;
 use token::{NumberLiteral, Token, KEYWORDS};
+use validation::{LexError, LexErrorKind, LexErrorLocation, LexResult};
 
 #[derive(Debug)]
 pub struct LexedToken {
@@ -70,8 +69,6 @@ impl<'a> RewindableCharIterator<'a> {
         self.rewound = true
     }
 }
-
-type LexResult = Result<Token, LexErrorKind>;
 
 pub fn lex<'a, 'b>(src: &'a str, filename: &'b str) -> (Vec<LexedToken>, Vec<LexError<'b>>) {
     let mut state = LexerState {
@@ -180,7 +177,7 @@ impl<'a, 'b> LexerState<'a, 'b> {
                     Ok(self.lex_identifier_or_keyword(letter))
                 }
 
-                number @ '0'...'9' => Ok(self.lex_number(number)),
+                number @ '0'...'9' => self.lex_number(number),
 
                 '"' => self.lex_quoted_string('"'),
                 '\'' => self.lex_quoted_string('\''),
@@ -368,7 +365,7 @@ impl<'a, 'b> LexerState<'a, 'b> {
         }
     }
 
-    fn lex_number(&mut self, digit: char) -> Token {
+    fn lex_number(&mut self, digit: char) -> LexResult {
         let mut style = NumberLiteral::Decimal;
         let mut value = String::new();
         let mut suffix = None;
@@ -409,11 +406,7 @@ impl<'a, 'b> LexerState<'a, 'b> {
             // a suffix of "abs".
             if let Some('a'...'z') | Some('A'...'Z') | Some('_') = self.chars.peek() {
                 self.chars.rewind();
-                return Token::NumberLiteral {
-                    style,
-                    value,
-                    suffix,
-                };
+                return validation::validate_number_literal(style, value, suffix);
             }
             self.increment_pos('.');
             value.push('.');
@@ -433,11 +426,7 @@ impl<'a, 'b> LexerState<'a, 'b> {
             suffix = Some(suffix_str);
         }
 
-        return Token::NumberLiteral {
-            style,
-            value,
-            suffix,
-        };
+        validation::validate_number_literal(style, value, suffix)
     }
 
     lex_digits_fn!(lex_binary_digits: '0'...'1', '_');

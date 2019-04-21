@@ -8,6 +8,17 @@ pub enum NumberLiteral {
     Decimal,
 }
 
+impl NumberLiteral {
+    pub fn radix(&self) -> u32 {
+        match self {
+            NumberLiteral::Binary => 2,
+            NumberLiteral::Octal => 8,
+            NumberLiteral::Decimal => 10,
+            NumberLiteral::Hexadecimal => 16,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Token {
     // Keywords

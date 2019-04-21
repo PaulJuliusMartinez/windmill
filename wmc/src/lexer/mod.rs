@@ -525,6 +525,8 @@ impl<'a> LexerState<'a> {
         // Check for decimal.
         if let Some('.') = self.chars.peek() {
             self.chars.next();
+            // We want to lex "4.abs" as Number Dot Identifier, not a floating point literal with
+            // a suffix of "abs".
             if let Some('a'...'z') | Some('A'...'Z') | Some('_') = self.chars.peek() {
                 self.chars.rewind();
                 return Token::NumberLiteral {

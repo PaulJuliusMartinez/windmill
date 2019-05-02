@@ -4,6 +4,7 @@ extern crate lazy_static;
 use std::{env, fs};
 
 mod lexer;
+mod parser;
 
 fn main() {
     let args: Vec<_> = env::args().collect();
@@ -27,4 +28,13 @@ fn main() {
         eprintln!("Compilation failed due to lexical errors.");
         return;
     }
+
+    let non_ws_tokens: Vec<lexer::LexedToken> = tokens
+        .into_iter()
+        .filter(|t| t.token.is_meaningful_for_parsing())
+        .collect();
+
+    dbg!(&non_ws_tokens);
+
+    println!("{:#?}", parser::parse(non_ws_tokens.as_slice()));
 }

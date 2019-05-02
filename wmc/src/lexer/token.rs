@@ -37,7 +37,7 @@ impl NumberLiteral {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Token {
     // Keywords
     KwIf,
@@ -56,7 +56,9 @@ pub enum Token {
     KwSet,
     KwSelf,
     KwSelfType,
+    KwInterface,
     KwStruct,
+    KwVariant,
 
     // More complex tokens
     Whitespace(String),
@@ -123,6 +125,15 @@ pub enum Token {
     RightCurly,
 }
 
+impl Token {
+    pub fn is_meaningful_for_parsing(&self) -> bool {
+        match self {
+            Token::Whitespace(_) | Token::LineComment(_) | Token::BlockComment(_) => false,
+            _ => true,
+        }
+    }
+}
+
 lazy_static! {
     pub static ref KEYWORDS: HashMap<&'static str, Token> = {
         let mut m = HashMap::new();
@@ -139,8 +150,10 @@ lazy_static! {
         m.insert("let", Token::KwLet);
         m.insert("set", Token::KwSet);
         m.insert("self", Token::KwSelf);
-        m.insert("selfType", Token::KwSelfType);
+        m.insert("Self", Token::KwSelfType);
+        m.insert("interface", Token::KwInterface);
         m.insert("struct", Token::KwStruct);
+        m.insert("variant", Token::KwVariant);
         m
     };
 }

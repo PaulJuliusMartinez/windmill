@@ -1,4 +1,8 @@
 fn main() {
-  println("Hello, world!");
-  let x = !(y != z);
+  "asd" println("Hello, \\world!");
+  let x = ;
 }
+"as\u{233f40}"
+'ab'
+0o1234f32 "sdf
+1.234i32;

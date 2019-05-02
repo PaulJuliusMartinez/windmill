@@ -1,6 +1,6 @@
 use std::str::Chars;
 
-mod token;
+pub mod token;
 mod validation;
 
 use token::{NumberLiteral, Token, KEYWORDS};
@@ -8,9 +8,9 @@ use validation::{LexError, LexErrorKind, LexErrorLocation, LexResult};
 
 #[derive(Debug)]
 pub struct LexedToken {
-    token: Token,
-    line_no: u32,
-    col_no: u32,
+    pub token: Token,
+    pub line_no: u32,
+    pub col_no: u32,
 }
 
 struct LexerState<'a, 'b> {

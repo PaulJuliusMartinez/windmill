@@ -19,6 +19,7 @@ pub struct FunctionDef<'a> {
 
 #[derive(Debug)]
 pub enum TypeLiteral<'a> {
+    PlainType(&'a str),
     ParameterizedType {
         main_type: &'a str,
         generic_types: Vec<TypeLiteral<'a>>,

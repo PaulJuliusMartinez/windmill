@@ -25,6 +25,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn consume_token(&mut self) -> Option<&'a Token> {
+        let token = self.peek_token();
+        self.increment();
+        token
+    }
+
     fn increment(&mut self) {
         if self.curr_token_index < self.tokens.len() {
             self.curr_token_index += 1
@@ -35,8 +41,7 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
 
         loop {
-            //match self.peek_token() {
-            match Parser::peek_token(&self) {
+            match self.peek_token() {
                 Some(Token::KwFn) => items.push(self.parse_function_def()),
                 Some(Token::KwStruct) => items.push(self.parse_struct_def()),
                 Some(Token::KwVariant) => items.push(self.parse_variant_def()),
@@ -47,6 +52,7 @@ impl<'a> Parser<'a> {
                         "Expected 'fn', 'struct', 'variant' or 'interface'; got {:?}.",
                         t
                     );
+                    self.increment();
                 }
             }
         }
@@ -75,11 +81,61 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_generics(&mut self) -> Vec<&'a str> {
-        Vec::new()
+        let mut generics = Vec::new();
+
+        match self.peek_token() {
+            Some(Token::LessThan) => { /* We have generics! */ }
+            _ => return generics,
+        }
+
+        self.increment();
+
+        while let Some(generic_arg) = self.peek_identifier() {
+            generics.push(generic_arg);
+            self.increment();
+
+            match self.consume_token() {
+                Some(Token::Comma) => { /* Keep parsing more generics */ }
+                Some(Token::GreaterThan) => {
+                    return generics;
+                }
+                t => {
+                    eprintln!("Expected ',' or '>' when passing fn generics; got {:?}", t);
+                    return generics;
+                }
+            }
+        }
+
+        eprintln!("Unexpected EOF while parsing fn generics.");
+
+        return generics;
     }
 
     fn parse_function_args(&mut self) -> Vec<(&'a str, TypeLiteral<'a>)> {
-        Vec::new()
+        let mut function_args = Vec::new();
+
+        while let Some(arg_name) = self.consume_identifier() {
+            self.consume_syntax(Token::Colon);
+            let arg_type = self.parse_type_literal();
+            function_args.push((arg_name, arg_type));
+
+            match self.peek_token() {
+                Some(Token::Comma) => {
+                    self.increment();
+                }
+                Some(Token::RightParen) => break,
+                t => {
+                    eprintln!("Expected ',' or ')' when passing fn args; got {:?}", t);
+                    return function_args;
+                }
+            }
+        }
+
+        function_args
+    }
+
+    fn parse_type_literal(&mut self) -> TypeLiteral<'a> {
+        TypeLiteral::PlainType(self.consume_identifier().unwrap())
     }
 
     fn parse_function_return_type(&mut self) -> Option<TypeLiteral<'a>> {
@@ -99,6 +155,14 @@ impl<'a> Parser<'a> {
     }
 
     fn consume_identifier(&mut self) -> Option<&'a str> {
+        let ident = self.peek_identifier();
+        if ident.is_some() {
+            self.increment();
+        }
+        ident
+    }
+
+    fn peek_identifier(&mut self) -> Option<&'a str> {
         let ident = match self.peek_token() {
             Some(Token::Identifier(identifier)) => Some(identifier.as_str()),
             _ => {
@@ -106,10 +170,6 @@ impl<'a> Parser<'a> {
                 None
             }
         };
-
-        if ident.is_some() {
-            self.increment();
-        }
 
         ident
     }

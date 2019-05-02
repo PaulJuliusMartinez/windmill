@@ -1,1 +1,5 @@
-fn foo() {}
+fn normal_func() {}
+fn func_with_one_generic<A>() {}
+fn func_with_generics<A, B, C>() {}
+fn func_with_arg(a: A) {}
+fn func_with_args(a: A, b: B) {}

@@ -53,6 +53,14 @@ AnonStructType =
   | "{" AnonStructField ("," AnonStructField)* ","? ")"
 
 AnonStructField = IDENTIFIER ":" Type
+
+How to tell difference between function that returns an array and an array of functions?
+
+(T, V) -> S[][]
+(T, V) -> S[]
+
+[(T, V) => S]
+(T, V) => [S]
 ```
 
 ### Expressions

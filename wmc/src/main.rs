@@ -34,7 +34,7 @@ fn main() {
         .filter(|t| t.token.is_meaningful_for_parsing())
         .collect();
 
-    dbg!(&non_ws_tokens);
+    // dbg!(&non_ws_tokens);
 
     println!("{:#?}", parser::parse(non_ws_tokens.as_slice()));
 }

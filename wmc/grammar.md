@@ -25,6 +25,10 @@ FunctionArgs = FunctionArg ("," FunctionArg)* ","?
 
 FunctionArg = IDENTIFIER ":" Type
 
+FunctionReturyType =
+  | epsilon
+  | ":" Type
+
 BlockExpression = "{" Expression "}"
 ```
 

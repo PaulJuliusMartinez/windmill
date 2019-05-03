@@ -104,9 +104,16 @@ impl<'a> Parser<'a> {
                     return generics;
                 }
             }
+
+            // Allow trailing commas; e.g., fn foo<A, B,>
+            if self.is_next_token_eq(Token::GreaterThan) {
+                // Eat The
+                self.increment();
+                return generics;
+            }
         }
 
-        eprintln!("Unexpected EOF while parsing fn generics.");
+        eprintln!("Unexpected non-identifier while parsing fn generics.");
 
         return generics;
     }
@@ -129,13 +136,87 @@ impl<'a> Parser<'a> {
                     return function_args;
                 }
             }
+
+            // Allow trailing commas; e.g., fn foo(a: A, b: B,)
+            if self.is_next_token_eq(Token::RightParen) {
+                return function_args;
+            }
         }
 
         function_args
     }
 
     fn parse_type_literal(&mut self) -> TypeLiteral<'a> {
-        TypeLiteral::PlainType(self.consume_identifier().unwrap())
+        let type_literal = match self.peek_token() {
+            Some(Token::Identifier(identifier)) => {
+                let type_ident = identifier.as_str();
+                TypeLiteral::PlainType(type_ident)
+            }
+            Some(Token::LeftParen) => self.parse_paren_type(),
+            _ => self.parse_paren_type(),
+        };
+
+        // Hmmm, array types are tricky.
+        if self.is_next_token_eq(Token::LeftSquare) {
+            self.increment();
+            self.consume_token(Token::RightSquare);
+            return TypeLiteral::ArrayType(Box::new(type_literal));
+        }
+
+        type_literal
+    }
+
+    fn parse_paren_type(&mut self) -> TypeLiteral<'a> {
+        // Consume '('
+        self.consume_syntax(Token::LeftParen);
+
+        // Turn "()" into a tuple type with no elements.
+        if self.is_next_token_eq(Token::RightParen) {
+            self.increment();
+            return TypeLiteral::TupleType(Vec::new());
+        }
+
+        let first_type = self.parse_type_literal();
+
+        // This is just a parenthesized type; return it directly.
+        if self.is_next_token_eq(Token::RightParen) {
+            self.increment();
+            return first_type;
+        }
+
+        // We must get a comma next.
+        self.consume_syntax(Token::Comma);
+
+        let tuple_types = vec![first_type];
+
+        // Parse the rest of the elements of the tuple.
+        loop {
+            if self.is_next_token_eq(Token::RightParen) {
+                self.increment();
+                break;
+            }
+            tuple_types.push(self.parse_type_literal());
+
+            match self.peek_token() {
+                Some(Token::Comma) => {
+                    self.increment();
+                }
+                Some(Token::RightParen) => {
+                    self.increment();
+                    break;
+                }
+                t => {
+                    eprintln!(
+                        "Expected ',' or ')' while parsing parethesized type; got {:?}",
+                        t
+                    );
+                    break;
+                }
+            }
+        }
+
+        // TODO (paul): Check for function return type here and maybe return TypeLiteral::FnType.
+        TypeLiteral::TupleType(tuple_types);
     }
 
     fn parse_function_return_type(&mut self) -> Option<TypeLiteral<'a>> {
@@ -154,6 +235,10 @@ impl<'a> Parser<'a> {
         unimplemented!()
     }
 
+    /*
+     * These are all little helpers for peeking/consuming certain types of tokens.
+     */
+
     fn consume_identifier(&mut self) -> Option<&'a str> {
         let ident = self.peek_identifier();
         if ident.is_some() {
@@ -162,13 +247,10 @@ impl<'a> Parser<'a> {
         ident
     }
 
-    fn peek_identifier(&mut self) -> Option<&'a str> {
+    fn peek_identifier(&self) -> Option<&'a str> {
         let ident = match self.peek_token() {
             Some(Token::Identifier(identifier)) => Some(identifier.as_str()),
-            _ => {
-                eprintln!("Expected identifier.");
-                None
-            }
+            _ => None,
         };
 
         ident
@@ -185,5 +267,12 @@ impl<'a> Parser<'a> {
             }
         }
         self.increment();
+    }
+
+    fn is_next_token_eq(&self, token: Token) -> bool {
+        match self.peek_token() {
+            Some(t) if *t == token => true,
+            _ => false,
+        }
     }
 }

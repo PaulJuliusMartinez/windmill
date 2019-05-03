@@ -1,5 +1,21 @@
-fn normal_func() {}
-fn func_with_one_generic<A>() {}
-fn func_with_generics<A, B, C>() {}
-fn func_with_arg(a: A) {}
-fn func_with_args(a: A, b: B) {}
+// fn normal_func() {}
+// fn func_with_one_generic<A>() {}
+// fn func_with_one_generic<A,>() {}
+// fn func_with_generics<A, B, C>() {}
+// fn func_with_generics<A, B, C,>() {}
+// fn func_with_arg(a: A) {}
+// fn func_with_arg(a: A,) {}
+// fn func_with_args(a: A, b: B) {}
+// fn func_with_args(a: A, b: B, c: C,) {}
+fn parse_ident_type(x: A) {}
+fn parse_parameterized_type_a(x: B<X>) {}
+fn parse_parameterized_type_b(x: B<X,>) {}
+fn parse_parameterized_type_c(x: B<X, Y, Z>) {}
+fn parse_parameterized_type_d(x: B<X, Y, Z,>) {}
+fn parse_array_type(x: A[]) {}
+fn parse_arrays_type(x: A[][][]) {}
+fn parse_unit_type(x: ()) {}
+fn parse_parenthesized_type_type(x: (B)) {}
+fn parse_single_element_tuple_type(x: (B,)) {}
+fn parse_multi_element_tuple_type(x: (B, C, D)) {}
+fn parse_multi_element_tuple_trailing_comma_type(x: (B, C, D,)) {}

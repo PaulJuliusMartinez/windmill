@@ -8,6 +8,8 @@ pub fn parse<'a>(tokens: &'a [LexedToken]) -> Vec<Item<'a>> {
     let mut parser = Parser {
         tokens,
         curr_token_index: 0,
+        nested_parameterized_type_depth: 0,
+        partially_processed_double_greater_than: false,
     };
     parser.parse_items()
 }
@@ -15,6 +17,10 @@ pub fn parse<'a>(tokens: &'a [LexedToken]) -> Vec<Item<'a>> {
 struct Parser<'a> {
     tokens: &'a [LexedToken],
     curr_token_index: usize,
+
+    // To handle Option<Option<T>> correctly.
+    nested_parameterized_type_depth: i32,
+    partially_processed_double_greater_than: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -237,6 +243,7 @@ impl<'a> Parser<'a> {
 
     fn parse_parameterized_types(&mut self) -> Vec<TypeLiteral<'a>> {
         self.consume_syntax(Token::LessThan);
+        self.nested_parameterized_type_depth += 1;
         let mut parameter_types = Vec::new();
 
         loop {
@@ -244,6 +251,7 @@ impl<'a> Parser<'a> {
 
             match self.peek_token() {
                 Some(Token::GreaterThan) => {
+                    self.nested_parameterized_type_depth -= 1;
                     self.increment();
                     break;
                 }
@@ -251,6 +259,28 @@ impl<'a> Parser<'a> {
                     self.increment();
                     // Handle trailing comma.
                     if self.is_next_token_eq(Token::GreaterThan) {
+                        self.nested_parameterized_type_depth -= 1;
+                        self.increment();
+                        break;
+                    }
+                }
+                // We want to be able to correctly parse Option<Option<T>>.
+                Some(Token::DoubleGreaterThan) => {
+                    // First time we've seen the >>:
+                    if !self.partially_processed_double_greater_than {
+                        if self.nested_parameterized_type_depth < 2 {
+                            eprintln!("Too many closing '>' in parameterized type");
+                            self.increment();
+                            break;
+                        } else {
+                            // _Don't_ increment pass this token; we'll want to process it again.
+                            self.partially_processed_double_greater_than = true;
+                            self.nested_parameterized_type_depth -= 1;
+                            break;
+                        }
+                    } else {
+                        self.partially_processed_double_greater_than = false;
+                        self.nested_parameterized_type_depth -= 1;
                         self.increment();
                         break;
                     }

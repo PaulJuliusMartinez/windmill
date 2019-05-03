@@ -20,3 +20,10 @@ fn parse_single_element_tuple_type(x: (B,)) {}
 fn parse_multi_element_tuple_type(x: (B, C, D)) {}
 fn parse_multi_element_tuple_trailing_comma_type(x: (B, C, D,)) {}
 fn parse_complex_type(x: Option<T, (A, ())>[]) {}
+fn parse_nested_parameterized_types_a(x: Option<Option<T>>) {}
+fn parse_nested_parameterized_types_b(x: Option<Option<T> >) {}
+fn parse_nested_parameterized_types_c(x: O<O<O<T>>>) {}
+fn parse_nested_parameterized_types_d(x: O<O<O<O<T>>>>) {}
+fn parse_nested_parameterized_types_e(x: O<O<O<O<T> >> >) {}
+// fn parse_bad_nested_parameterized_types_a(x: Option<Option<X>) {}
+// fn parse_bad_nested_parameterized_types_b(x: (Option<X>, i32)>) {}

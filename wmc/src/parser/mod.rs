@@ -147,20 +147,36 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_literal(&mut self) -> TypeLiteral<'a> {
-        let type_literal = match self.peek_token() {
+        let mut type_literal = match self.peek_token() {
             Some(Token::Identifier(identifier)) => {
+                // Eat identifier
+                self.increment();
+
                 let type_ident = identifier.as_str();
-                TypeLiteral::PlainType(type_ident)
+                if self.is_next_token_eq(Token::LessThan) {
+                    let parameterized_types = self.parse_parameterized_types();
+                    TypeLiteral::ParameterizedType {
+                        main_type: type_ident,
+                        parameterized_types,
+                    }
+                } else {
+                    TypeLiteral::PlainType(type_ident)
+                }
             }
             Some(Token::LeftParen) => self.parse_paren_type(),
-            _ => self.parse_paren_type(),
+            t => {
+                eprintln!("Expected identifier or '(' to start parsing type literal, but got {:?} instead", t);
+                TypeLiteral::PlainType("ERROR")
+            }
         };
 
-        // Hmmm, array types are tricky.
-        if self.is_next_token_eq(Token::LeftSquare) {
+        // Hmmm, array types are tricky. We'll just eagerly consume [] as long as we can.
+        let mut is_array_type = false;
+        while self.is_next_token_eq(Token::LeftSquare) {
             self.increment();
-            self.consume_token(Token::RightSquare);
-            return TypeLiteral::ArrayType(Box::new(type_literal));
+            self.consume_syntax(Token::RightSquare);
+            type_literal = TypeLiteral::ArrayType(Box::new(type_literal));
+            is_array_type = true;
         }
 
         type_literal
@@ -187,7 +203,7 @@ impl<'a> Parser<'a> {
         // We must get a comma next.
         self.consume_syntax(Token::Comma);
 
-        let tuple_types = vec![first_type];
+        let mut tuple_types = vec![first_type];
 
         // Parse the rest of the elements of the tuple.
         loop {
@@ -216,7 +232,40 @@ impl<'a> Parser<'a> {
         }
 
         // TODO (paul): Check for function return type here and maybe return TypeLiteral::FnType.
-        TypeLiteral::TupleType(tuple_types);
+        TypeLiteral::TupleType(tuple_types)
+    }
+
+    fn parse_parameterized_types(&mut self) -> Vec<TypeLiteral<'a>> {
+        self.consume_syntax(Token::LessThan);
+        let mut parameter_types = Vec::new();
+
+        loop {
+            parameter_types.push(self.parse_type_literal());
+
+            match self.peek_token() {
+                Some(Token::GreaterThan) => {
+                    self.increment();
+                    break;
+                }
+                Some(Token::Comma) => {
+                    self.increment();
+                    // Handle trailing comma.
+                    if self.is_next_token_eq(Token::GreaterThan) {
+                        self.increment();
+                        break;
+                    }
+                }
+                t => {
+                    eprintln!(
+                        "Expected ',' or '>' while parsing parethesized type; got {:?}",
+                        t
+                    );
+                    break;
+                }
+            }
+        }
+
+        parameter_types
     }
 
     fn parse_function_return_type(&mut self) -> Option<TypeLiteral<'a>> {

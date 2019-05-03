@@ -22,7 +22,7 @@ pub enum TypeLiteral<'a> {
     PlainType(&'a str),
     ParameterizedType {
         main_type: &'a str,
-        generic_types: Vec<TypeLiteral<'a>>,
+        parameterized_types: Vec<TypeLiteral<'a>>,
     },
     TupleType(Vec<TypeLiteral<'a>>),
     FnType {

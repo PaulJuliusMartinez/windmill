@@ -19,3 +19,4 @@ fn parse_parenthesized_type_type(x: (B)) {}
 fn parse_single_element_tuple_type(x: (B,)) {}
 fn parse_multi_element_tuple_type(x: (B, C, D)) {}
 fn parse_multi_element_tuple_trailing_comma_type(x: (B, C, D,)) {}
+fn parse_complex_type(x: Option<T, (A, ())>[]) {}
